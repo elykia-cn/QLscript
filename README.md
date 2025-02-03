@@ -28,4 +28,11 @@
 9. **[ArcadiaScriptPublic](https://github.com/zjk2017/ArcadiaScriptPublic)**  
    公共的 Arcadia 脚本，支持自动化任务管理。
 
-如果需要进一步分析或修改某些脚本，随时告诉我！
+10. **[zyqinglong](https://github.com/linbailo/zyqinglong)**  
+   青龙面板的自动化脚本，提供多种自动化任务。
+
+11. **[QLScriptPublic](https://github.com/smallfawn/QLScriptPublic)**  
+   公开的青龙脚本，包含多个自动化功能，适用于青龙面板。
+
+
+
