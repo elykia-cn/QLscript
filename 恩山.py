@@ -5,7 +5,7 @@ from typing import List, Dict
 import requests
 import urllib3
 from dailycheckin import CheckIn
-import notify  # 从青龙面板引入notify模块
+import notify  # 引入青龙面板的通知模块
 
 # 禁用SSL警告
 urllib3.disable_warnings()
@@ -69,13 +69,30 @@ class EnShan(CheckIn):
                 timeout=10
             )
             response.raise_for_status()
+
+            # 判断签到是否成功
+            if '每天登录' in response.text:
+                h = etree.HTML(response.text)
+                data = h.xpath('//tr/td[6]/text()')
+                msg = f"签到成功或今日已签到，最后签到时间：{data[0]}"
+                logging.info(msg)
+                self.send_notification(msg)  # 发送签到成功通知
+            else:
+                msg = '签到失败，可能是cookie失效了！'
+                logging.error(msg)
+                self.send_notification(msg)  # 发送签到失败通知
+
             return self._parse_credit(response.text)
         except requests.exceptions.RequestException as e:
             logging.error(f"请求失败: {str(e)}")
-            return [{"name": "签到失败", "value": "网络请求异常"}]
+            msg = "签到失败，网络请求异常"
+            self.send_notification(msg)  # 发送网络请求失败通知
+            return [{"name": "签到失败", "value": msg}]
         except Exception as e:
             logging.error(f"未知错误: {str(e)}")
-            return [{"name": "签到失败", "value": "系统异常"}]
+            msg = "签到失败，系统异常"
+            self.send_notification(msg)  # 发送系统错误通知
+            return [{"name": "签到失败", "value": msg}]
 
     def send_notification(self, result: str) -> None:
         """发送签到结果通知"""
@@ -89,7 +106,6 @@ class EnShan(CheckIn):
         """主执行逻辑"""
         result = self.sign()
         result_text = "\n".join([f"{item['name']}: {item['value']}" for item in result])
-        self.send_notification(result_text)  # 发送通知
         return result_text
 
 if __name__ == "__main__":
