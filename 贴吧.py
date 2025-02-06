@@ -2,36 +2,42 @@ import hashlib
 import json
 import os
 import re
-
 import requests
+import notify  # 引入青龙面板的通知模块
 
-from dailycheckin import CheckIn
-
-
-class Tieba(CheckIn):
+class Tieba:
+    """百度贴吧签到器"""
     name = "百度贴吧"
 
-    def __init__(self, check_item):
-        self.check_item = check_item
+    def __init__(self):
+        """初始化，获取cookie"""
+        self.tieba_cookie = os.getenv("TIEBA_COOKIE")
+        if not self.tieba_cookie:
+            raise ValueError("请设置TIEBA_COOKIE环境变量")
 
     @staticmethod
     def login_info(session):
+        """获取登录信息"""
         return session.get(url="https://zhidao.baidu.com/api/loginInfo").json()
 
     def valid(self, session):
+        """验证登录状态"""
         try:
             content = session.get(url="https://tieba.baidu.com/dc/common/tbs")
         except Exception as e:
             return False, f"登录验证异常,错误信息: {e}"
+
         data = json.loads(content.text)
         if data["is_login"] == 0:
             return False, "登录失败,cookie 异常"
+
         tbs = data["tbs"]
         user_name = self.login_info(session=session)["userName"]
         return tbs, user_name
 
     @staticmethod
     def tieba_list_more(session):
+        """获取贴吧列表"""
         content = session.get(
             url="https://tieba.baidu.com/f/like/mylike?&pn=1",
             timeout=(5, 20),
@@ -45,6 +51,7 @@ class Tieba(CheckIn):
             )
         except Exception:
             pn = 1
+
         next_page = 1
         pattern = re.compile(r".*?<a href=\"/f\?kw=.*?title=\"(.*?)\">")
         while next_page <= pn:
@@ -58,11 +65,13 @@ class Tieba(CheckIn):
             )
 
     def get_tieba_list(self, session):
+        """获取所有贴吧名称"""
         tieba_list = list(self.tieba_list_more(session=session))
         return tieba_list
 
     @staticmethod
     def sign(session, tb_name_list, tbs):
+        """执行签到操作"""
         success_count, error_count, exist_count, shield_count = 0, 0, 0, 0
         for tb_name in tb_name_list:
             md5 = hashlib.md5(
@@ -85,6 +94,8 @@ class Tieba(CheckIn):
                     error_count += 1
             except Exception as e:
                 print(f"贴吧 {tb_name} 签到异常,原因{str(e)}")
+        
+        # 格式化签到结果
         msg = [
             {"name": "贴吧总数", "value": len(tb_name_list)},
             {"name": "签到成功", "value": success_count},
@@ -94,33 +105,49 @@ class Tieba(CheckIn):
         ]
         return msg
 
+    def send_notification(self, result: str):
+        """发送签到结果通知"""
+        try:
+            notify.send(self.name, result)
+            print("通知已发送:", result)  # 打印通知内容
+        except Exception as e:
+            print(f"通知发送失败: {str(e)}")
+
     def main(self):
+        """主执行逻辑"""
         tieba_cookie = {
             item.split("=")[0]: item.split("=")[1]
-            for item in self.check_item.get("cookie").split("; ")
+            for item in self.tieba_cookie.split("; ")
         }
         session = requests.session()
         requests.utils.add_dict_to_cookiejar(session.cookies, tieba_cookie)
         session.headers.update({"Referer": "https://www.baidu.com/"})
+
+        # 验证登录状态
         tbs, user_name = self.valid(session=session)
         if tbs:
+            # 获取贴吧列表并执行签到
             tb_name_list = self.get_tieba_list(session=session)
             msg = self.sign(session=session, tb_name_list=tb_name_list, tbs=tbs)
             msg = [{"name": "帐号信息", "value": user_name}] + msg
+            self.send_notification(f"✅【签到成功】\n{user_name} 贴吧签到完成")
         else:
             msg = [
                 {"name": "帐号信息", "value": user_name},
                 {"name": "签到信息", "value": "Cookie 可能过期"},
             ]
-        msg = "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg])
-        return msg
+            self.send_notification(f"❌【签到失败】\n{user_name} 登录失败，请检查Cookie。")
+        
+        # 格式化并返回消息
+        msg_str = "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg])
+        return msg_str
 
 
 if __name__ == "__main__":
-    with open(
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json"),
-        encoding="utf-8",
-    ) as f:
-        datas = json.loads(f.read())
-    _check_item = datas.get("TIEBA", [])[0]
-    print(Tieba(check_item=_check_item).main())
+    try:
+        # 启动签到任务
+        tieba = Tieba()
+        result = tieba.main()
+        print(result)
+    except Exception as e:
+        print(f"运行失败: {str(e)}")
