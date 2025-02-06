@@ -1,67 +1,93 @@
-import json
 import os
 import re
-
+import logging
+from typing import List, Dict, Union
 import requests
 import urllib3
-
 from dailycheckin import CheckIn
 
+# 禁用SSL警告
 urllib3.disable_warnings()
 
+# 配置日志记录
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()]
+)
 
 class EnShan(CheckIn):
+    """恩山无线论坛签到器"""
     name = "恩山无线论坛"
+    
+    # 常量定义
+    CREDIT_URL = "https://www.right.com.cn/FORUM/home.php?mod=spacecp&ac=credit&showcredit=1"
+    USER_AGENT = os.getenv("ENSHAN_UA", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
+    COIN_PATTERN = r"恩山币: </em>(.*?)&nbsp;"
+    POINT_PATTERN = r"<em>积分: </em>(.*?)<span"
 
-    def __init__(self, check_item):
-        self.check_item = check_item
+    def __init__(self, check_item: Dict = None):
+        super().__init__(check_item)
+        self.cookie = self._get_cookie()
 
-    @staticmethod
-    def sign(cookie):
-        msg = []
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 6.3; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.5359.125 Safari/537.36",
-            "Cookie": cookie,
+    def _get_cookie(self) -> str:
+        """从环境变量获取Cookie"""
+        cookie = os.getenv("ENSHAN_COOKIE")
+        if not cookie:
+            raise ValueError("未找到ENSHAN_COOKIE环境变量配置")
+        return cookie
+
+    def _build_headers(self) -> Dict[str, str]:
+        """构建请求头"""
+        return {
+            "User-Agent": self.USER_AGENT,
+            "Cookie": self.cookie,
+            "Referer": self.CREDIT_URL
         }
-        response = requests.get(
-            url="https://www.right.com.cn/FORUM/home.php?mod=spacecp&ac=credit&showcredit=1",
-            headers=headers,
-            verify=False,
-        )
+
+    def _parse_credit(self, response_text: str) -> List[Dict[str, str]]:
+        """解析积分信息"""
         try:
-            coin = re.findall("恩山币: </em>(.*?)&nbsp;", response.text)[0]
-            point = re.findall("<em>积分: </em>(.*?)<span", response.text)[0]
-            msg = [
-                {
-                    "name": "恩山币",
-                    "value": coin,
-                },
-                {
-                    "name": "积分",
-                    "value": point,
-                },
+            coin = re.findall(self.COIN_PATTERN, response_text)[0]
+            point = re.findall(self.POINT_PATTERN, response_text)[0]
+            return [
+                {"name": "恩山币", "value": coin},
+                {"name": "积分", "value": point}
             ]
+        except IndexError as e:
+            logging.error("解析页面数据失败，可能页面结构已变更")
+            raise RuntimeError("解析积分信息失败") from e
+
+    def sign(self) -> List[Dict[str, str]]:
+        """执行签到操作"""
+        try:
+            response = requests.get(
+                url=self.CREDIT_URL,
+                headers=self._build_headers(),
+                verify=False,
+                timeout=10
+            )
+            response.raise_for_status()
+            return self._parse_credit(response.text)
+        except requests.exceptions.RequestException as e:
+            logging.error(f"请求失败: {str(e)}")
+            return [{"name": "签到失败", "value": "网络请求异常"}]
         except Exception as e:
-            msg = [
-                {
-                    "name": "签到失败",
-                    "value": str(e),
-                }
-            ]
-        return msg
+            logging.error(f"未知错误: {str(e)}")
+            return [{"name": "签到失败", "value": "系统异常"}]
 
-    def main(self):
-        cookie = self.check_item.get("cookie")
-        msg = self.sign(cookie=cookie)
-        msg = "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg])
-        return msg
-
+    def main(self) -> str:
+        """主执行逻辑"""
+        result = self.sign()
+        return "\n".join([f"{item['name']}: {item['value']}" for item in result])
 
 if __name__ == "__main__":
-    with open(
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json"),
-        encoding="utf-8",
-    ) as f:
-        datas = json.loads(f.read())
-    _check_item = datas.get("ENSHAN", [])[0]
-    print(EnShan(check_item=_check_item).main())
+    # 从环境变量读取配置
+    cookie = os.getenv("ENSHAN_COOKIE")
+    
+    if not cookie:
+        logging.error("请设置ENSHAN_COOKIE环境变量")
+        exit(1)
+        
+    checker = EnShan(check_item={"cookie": cookie})
+    print(checker.main())
