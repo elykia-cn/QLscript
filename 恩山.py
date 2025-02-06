@@ -11,7 +11,7 @@ urllib3.disable_warnings()
 
 # 配置日志记录
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # 设置为DEBUG级别以捕获更多日志
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()]
 )
@@ -35,19 +35,23 @@ class EnShan(CheckIn):
         cookie = os.getenv("ENSHAN_COOKIE")
         if not cookie:
             raise ValueError("未找到ENSHAN_COOKIE环境变量配置")
+        logging.debug(f"获取到的Cookie: {cookie}")  # 调试日志
         return cookie
 
     def _build_headers(self) -> Dict[str, str]:
         """构建请求头"""
-        return {
+        headers = {
             "User-Agent": self.USER_AGENT,
             "Cookie": self.cookie,
             "Referer": self.CREDIT_URL
         }
+        logging.debug(f"构建的请求头: {headers}")  # 调试日志
+        return headers
 
     def _parse_credit(self, response_text: str) -> List[Dict[str, str]]:
         """解析积分信息"""
         try:
+            logging.debug("开始解析积分信息")  # 调试日志
             coin = re.findall(self.COIN_PATTERN, response_text)[0]
             point = re.findall(self.POINT_PATTERN, response_text)[0]
             return [
@@ -61,6 +65,7 @@ class EnShan(CheckIn):
     def sign(self) -> List[Dict[str, str]]:
         """执行签到操作"""
         try:
+            logging.info("开始执行签到操作")  # 调试日志
             response = requests.get(
                 url=self.CREDIT_URL,
                 headers=self._build_headers(),
@@ -71,6 +76,7 @@ class EnShan(CheckIn):
             result = self._parse_credit(response.text)
             
             # 发送签到成功通知
+            logging.info("签到成功，发送通知")  # 调试日志
             notify.sendNotify(title="恩山无线论坛签到成功", content=f"恩山币: {result[0]['value']}\n积分: {result[1]['value']}")
             
             return result
