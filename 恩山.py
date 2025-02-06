@@ -59,7 +59,7 @@ class EnShan:
         """发送详细签到结果通知"""
         try:
             # 发送通知到青龙面板
-            notify.send("恩山无线论坛签到结果", result)
+            notify.send("恩山无线论坛", result)
             logging.info("通知已发送: " + result)
         except Exception as e:
             logging.error(f"通知发送失败: {str(e)}")
