@@ -2,7 +2,6 @@ import os
 import re
 import logging
 import requests
-from lxml import etree
 import notify  # 引入青龙面板的通知模块
 
 # 配置日志记录
@@ -32,12 +31,17 @@ class EnShan:
             response = requests.get(self.CREDIT_URL, headers=self._build_headers(), timeout=10)
             response.raise_for_status()
 
-            # 判断签到是否成功
+            # 使用正则表达式判断签到是否成功
             if '每天登录' in response.text:
-                h = etree.HTML(response.text)
-                data = h.xpath('//tr/td[6]/text()')
-                msg = f"签到成功或今日已签到，最后签到时间：{data[0]}"
-                self.send_notification(msg)
+                # 使用正则提取最后签到时间
+                match = re.search(r'<td class="num">([^<]+)</td>', response.text)
+                if match:
+                    last_sign_time = match.group(1)
+                    msg = f"签到成功或今日已签到，最后签到时间：{last_sign_time}"
+                    self.send_notification(msg)
+                else:
+                    msg = "未能提取签到时间"
+                    self.send_notification(msg)
             else:
                 msg = '签到失败，可能是cookie失效了！'
                 self.send_notification(msg)
