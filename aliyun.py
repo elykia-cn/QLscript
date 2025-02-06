@@ -10,8 +10,11 @@ class AliYun:
     """阿里云盘签到器"""
     name = "阿里云盘"
 
-    def __init__(self, check_item: dict):
-        self.check_item = check_item
+    def __init__(self):
+        """初始化，获取环境变量中的 token"""
+        self.refresh_token = os.getenv("ALIYUNDRIVE_TOKEN")
+        if not self.refresh_token:
+            raise ValueError("请设置ALIYUNDRIVE_TOKEN环境变量")
 
     def update_token(self, refresh_token):
         """更新token"""
@@ -63,8 +66,7 @@ class AliYun:
 
     def main(self):
         """主执行逻辑"""
-        refresh_token = self.check_item.get("refresh_token")
-        access_token = self.update_token(refresh_token)
+        access_token = self.update_token(self.refresh_token)
         if not access_token:
             msg = [{"name": "阿里云盘", "value": "token过期"}]
             self.send_notification("❌【签到失败】\ntoken过期")
@@ -77,11 +79,9 @@ class AliYun:
 
 if __name__ == "__main__":
     try:
-        # 从配置文件读取refresh_token
-        with open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json"), encoding="utf-8") as f:
-            datas = json.loads(f.read())
-        _check_item = datas.get("ALIYUN", [])[0]
-        result = AliYun(check_item=_check_item).main()
+        # 启动签到任务
+        checker = AliYun()
+        result = checker.main()
         print(result)
     except Exception as e:
         print(f"运行失败: {str(e)}")
