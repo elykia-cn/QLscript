@@ -5,7 +5,7 @@ from typing import List, Dict
 import requests
 import urllib3
 from dailycheckin import CheckIn
-import notify  # 引入notify模块
+from notify import sendNotify  # 从青龙面板引入notify模块
 
 # 禁用SSL警告
 urllib3.disable_warnings()
@@ -80,8 +80,8 @@ class EnShan(CheckIn):
     def send_notification(self, result: str) -> None:
         """发送签到结果通知"""
         try:
-            # 使用notify模块发送通知
-            notify.sendNotify("恩山无线论坛签到结果", result)
+            # 使用青龙面板的通知功能发送通知
+            sendNotify("恩山无线论坛签到结果", result)
         except Exception as e:
             logging.error(f"通知发送失败: {str(e)}")
 
