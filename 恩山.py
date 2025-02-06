@@ -27,7 +27,7 @@ class EnShan(CheckIn):
     POINT_PATTERN = r"<em>积分: </em>(.*?)<span"
 
     def __init__(self, check_item: Dict = None):
-        super().__init__(check_item)
+        super().__init__()  # 调用父类的无参数构造方法
         self.cookie = self._get_cookie()
 
     def _get_cookie(self) -> str:
