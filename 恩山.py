@@ -1,17 +1,18 @@
 import os
 import re
 import logging
+from typing import List, Dict
 import requests
 import urllib3
-from typing import List, Dict, Union
 from dailycheckin import CheckIn
+import notify  # 引入notify模块
 
 # 禁用SSL警告
 urllib3.disable_warnings()
 
 # 配置日志记录
 logging.basicConfig(
-    level=logging.DEBUG,  # 设置为DEBUG级别以捕获更多日志
+    level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()]
 )
@@ -27,7 +28,7 @@ class EnShan(CheckIn):
     POINT_PATTERN = r"<em>积分: </em>(.*?)<span"
 
     def __init__(self, check_item: Dict = None):
-        super().__init__(check_item)
+        super().__init__()  # 调用父类的无参数构造方法
         self.cookie = self._get_cookie()
 
     def _get_cookie(self) -> str:
@@ -35,23 +36,19 @@ class EnShan(CheckIn):
         cookie = os.getenv("ENSHAN_COOKIE")
         if not cookie:
             raise ValueError("未找到ENSHAN_COOKIE环境变量配置")
-        logging.debug(f"获取到的Cookie: {cookie}")  # 调试日志
         return cookie
 
     def _build_headers(self) -> Dict[str, str]:
         """构建请求头"""
-        headers = {
+        return {
             "User-Agent": self.USER_AGENT,
             "Cookie": self.cookie,
             "Referer": self.CREDIT_URL
         }
-        logging.debug(f"构建的请求头: {headers}")  # 调试日志
-        return headers
 
     def _parse_credit(self, response_text: str) -> List[Dict[str, str]]:
         """解析积分信息"""
         try:
-            logging.debug("开始解析积分信息")  # 调试日志
             coin = re.findall(self.COIN_PATTERN, response_text)[0]
             point = re.findall(self.POINT_PATTERN, response_text)[0]
             return [
@@ -65,7 +62,6 @@ class EnShan(CheckIn):
     def sign(self) -> List[Dict[str, str]]:
         """执行签到操作"""
         try:
-            logging.info("开始执行签到操作")  # 调试日志
             response = requests.get(
                 url=self.CREDIT_URL,
                 headers=self._build_headers(),
@@ -73,20 +69,36 @@ class EnShan(CheckIn):
                 timeout=10
             )
             response.raise_for_status()
-            result = self._parse_credit(response.text)
-            
-            # 发送签到成功通知
-            logging.info("签到成功，发送通知")  # 调试日志
-            notify.sendNotify(title="恩山无线论坛签到成功", content=f"恩山币: {result[0]['value']}\n积分: {result[1]['value']}")
-            
-            return result
+            return self._parse_credit(response.text)
         except requests.exceptions.RequestException as e:
             logging.error(f"请求失败: {str(e)}")
-            error_msg = "签到失败，网络请求异常"
-            notify.sendNotify(title="恩山无线论坛签到失败", content=error_msg)
-            return [{"name": "签到失败", "value": error_msg}]
+            return [{"name": "签到失败", "value": "网络请求异常"}]
         except Exception as e:
             logging.error(f"未知错误: {str(e)}")
-            error_msg = "签到失败，系统异常"
-            notify.sendNotify(title="恩山无线论坛签到失败", content=error_msg)
-            return [{"name": "签到失败", "value": error_msg}]
+            return [{"name": "签到失败", "value": "系统异常"}]
+
+    def send_notification(self, result: str) -> None:
+        """发送签到结果通知"""
+        try:
+            # 使用notify模块发送通知
+            notify.sendNotify("恩山无线论坛签到结果", result)
+        except Exception as e:
+            logging.error(f"通知发送失败: {str(e)}")
+
+    def main(self) -> str:
+        """主执行逻辑"""
+        result = self.sign()
+        result_text = "\n".join([f"{item['name']}: {item['value']}" for item in result])
+        self.send_notification(result_text)  # 发送通知
+        return result_text
+
+if __name__ == "__main__":
+    # 从环境变量读取配置
+    cookie = os.getenv("ENSHAN_COOKIE")
+    
+    if not cookie:
+        logging.error("请设置ENSHAN_COOKIE环境变量")
+        exit(1)
+        
+    checker = EnShan(check_item={"cookie": cookie})
+    print(checker.main())
