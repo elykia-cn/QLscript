@@ -1,19 +1,14 @@
-import json
 import os
 import re
 import requests
 import urllib3
 import notify  # 引入青龙面板的通知模块
 
-
 urllib3.disable_warnings()
 
 
-class EnShan(CheckIn):
+class EnShan:
     name = "恩山无线论坛"
-
-    def __init__(self, check_item):
-        self.check_item = check_item
 
     @staticmethod
     def sign():
@@ -33,7 +28,7 @@ class EnShan(CheckIn):
             verify=False,
         )
         try:
-            # 使用正则表达式提取“恩山币”
+            # 使用正则表达式提取“恩山币”和“积分”
             coin = re.findall("恩山币: </em>(.*?)&nbsp;", response.text)
             point = re.findall("<em>积分: </em>(.*?)<span", response.text)
             
@@ -65,14 +60,9 @@ class EnShan(CheckIn):
         except Exception as e:
             print(f"通知发送失败: {str(e)}")
 
-    def main(self):
-        msg = self.sign()
-        msg = "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg])
-        return msg
-
 
 if __name__ == "__main__":
     try:
-        print(EnShan(check_item={}).main())
+        print(EnShan.sign())
     except ValueError as e:
         print(str(e))
