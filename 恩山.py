@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 class EnShan:
     """恩山无线论坛签到器"""
-    CREDIT_URL = "https://www.right.com.cn/FORUM/home.php?mod=spacecp&ac=credit&showcredit=1"
+    LOG_URL = "https://www.right.com.cn/forum/home.php?mod=spacecp&ac=credit&op=log"  # 签到日志页面
     USER_AGENT = os.getenv("ENSHAN_UA", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
     
     def __init__(self):
@@ -23,7 +23,7 @@ class EnShan:
         return {
             "User-Agent": self.USER_AGENT,
             "Cookie": self.cookie,
-            "Referer": self.CREDIT_URL
+            "Referer": self.LOG_URL
         }
 
     def sign(self):
@@ -32,14 +32,14 @@ class EnShan:
             logging.info("开始进行签到请求...")
             with requests.Session() as s:
                 s.headers.update(self._build_headers())
-                response = s.get(self.CREDIT_URL, timeout=10)
+                response = s.get(self.LOG_URL, timeout=10)
                 response.raise_for_status()
 
-                # 判断签到是否成功（基于页面内容）
-                if '每天登录' in response.text:
+                # 判断签到日志中是否有“签到成功”或相关信息
+                if '成功' in response.text:  # 可以根据实际页面内容判断签到成功
                     # 使用XPath提取最后签到时间（如果能提取）
                     h = etree.HTML(response.text)
-                    last_sign_time = h.xpath('//td[@class="num"]/text()')[0] if h.xpath('//td[@class="num"]/text()') else None
+                    last_sign_time = h.xpath('//tr/td[6]/text()')[0] if h.xpath('//tr/td[6]/text()') else None
                     
                     if last_sign_time:
                         msg = f"✅【签到成功】\n今日已成功签到！\n最后签到时间：{last_sign_time}"
