@@ -42,24 +42,25 @@ class AliYun:
                     day_json = result["result"]["signInLogs"][i - 1]
                     if not day_json["isReward"]:
                         msg = [
-                            {"name": "阿里云盘", "value": "签到成功，今日未获得奖励"}
+                            {"name": "阿里云盘", "value": f"签到成功，今日未获得奖励"}
                         ]
                     else:
                         msg = [
                             {"name": "累计签到", "value": f"{sign_days} 天"},
                             {"name": "阿里云盘", "value": f"获得奖励：{day_json['reward']['name']} - {day_json['reward']['description']}"}
                         ]
-                    self.send_notification(logging_info)
+                    self.send_notification(logging_info, msg)
                     return msg
         else:
             msg = [{"name": "阿里云盘", "value": "签到失败，可能是token过期或其他错误"}]
-            self.send_notification("❌【签到失败】\n可能是token过期或其他原因。")
+            self.send_notification("❌【签到失败】\n可能是token过期或其他原因。", msg)
             return msg
 
-    def send_notification(self, result: str):
+    def send_notification(self, result: str, msg: list):
         """发送详细签到结果通知"""
         try:
-            notify.send(self.name, result)
+            # 包含值的结果一起发送通知
+            notify.send(self.name, f"{result}\n" + "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg]))
             print("通知已发送:", result)  # 打印通知内容
         except Exception as e:
             print(f"通知发送失败: {str(e)}")
@@ -69,7 +70,7 @@ class AliYun:
         access_token = self.update_token(self.refresh_token)
         if not access_token:
             msg = [{"name": "阿里云盘", "value": "token过期"}]
-            self.send_notification("❌【签到失败】\ntoken过期")
+            self.send_notification("❌【签到失败】\ntoken过期", msg)
             return msg
 
         msg = self.sign(access_token)
