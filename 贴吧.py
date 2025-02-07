@@ -1,172 +1,232 @@
 import os
 import requests
 import hashlib
-import re
 import time
+import copy
+import logging
 import random
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
-import notify  # 青龙面板的通知模块
+from config import Config
 
-class Tieba:
-    """百度贴吧签到器"""
-    name = "百度贴吧"
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
-    def __init__(self):
-        """初始化，获取cookie"""
-        self.tieba_cookie = os.getenv("TIEBA_COOKIE")
-        if not self.tieba_cookie:
-            raise ValueError("请设置TIEBA_COOKIE环境变量")
+ENV = os.environ
 
-    @staticmethod
-    def login_info(session):
-        """获取登录信息"""
-        return session.get(url="https://zhidao.baidu.com/api/loginInfo").json()
+s = requests.Session()
+adapter = requests.adapters.HTTPAdapter(
+    pool_connections=Config.HTTP_SETTINGS["POOL_CONNECTIONS"],  # 连接池的连接数
+    pool_maxsize=Config.HTTP_SETTINGS["POOL_MAXSIZE"],  # 连接池的最大数量
+    max_retries=Config.HTTP_SETTINGS["RETRY_TIMES"],  # 最大重试次数
+    pool_block=False,  # 连接池满时不阻塞
+)
+s.mount("http://", adapter)
+s.mount("https://", adapter)
 
-    def valid(self, session):
-        """验证登录状态"""
-        try:
-            content = session.get(url="https://tieba.baidu.com/dc/common/tbs")
-        except Exception as e:
-            return False, f"登录验证异常,错误信息: {e}"
 
-        data = content.json()
-        if data["is_login"] == 0:
-            return False, "登录失败,cookie 异常"
+def get_tbs(tieba_cookie):
+    logger.info("获取tbs开始")
+    headers = copy.copy(Config.HEADERS)
+    headers.update({"Cookie": f"TIEBA_COOKIE={tieba_cookie}"})
+    try:
+        tbs = s.get(
+            url=Config.API_URLS["TBS_URL"],
+            headers=headers,
+            timeout=Config.HTTP_SETTINGS["TIMEOUT"],
+        ).json()["tbs"]
+    except Exception as e:
+        logger.error("获取tbs出错: %s", e)
+        logger.info("重新获取tbs开始")
+        tbs = s.get(
+            url=Config.API_URLS["TBS_URL"],
+            headers=headers,
+            timeout=Config.HTTP_SETTINGS["TIMEOUT"],
+        ).json()["tbs"]
+    logger.info("获取tbs结束")
+    return tbs
 
-        tbs = data["tbs"]
-        user_name = self.login_info(session=session)["userName"]
-        return tbs, user_name
 
-    @staticmethod
-    def tieba_list_more(session):
-        """获取贴吧列表"""
-        content = session.get(
-            url="https://tieba.baidu.com/f/like/mylike?&pn=1",
-            timeout=(5, 20),
-            allow_redirects=False,
-        )
-        try:
-            pn = int(
-                re.match(
-                    r".*/f/like/mylike\?&pn=(.*?)\">尾页.*", content.text, re.S | re.I
-                ).group(1)
-            )
-        except Exception:
-            pn = 1
+def get_favorite(tieba_cookie):
+    logger.info("获取关注的贴吧开始")
+    all_bars = []
+    page = 1
 
-        next_page = 1
-        pattern = re.compile(r".*?<a href=\"/f\?kw=.*?title=\"(.*?)\">")
-        while next_page <= pn:
-            tbname = pattern.findall(content.text)
-            yield from tbname
-            next_page += 1
-            content = session.get(
-                url=f"https://tieba.baidu.com/f/like/mylike?&pn={next_page}",
-                timeout=(5, 20),
-                allow_redirects=False,
-            )
-
-    def get_tieba_list(self, session):
-        """获取所有贴吧名称"""
-        tieba_list = list(self.tieba_list_more(session=session))
-        return tieba_list
-
-    @staticmethod
-    def sign(session, tb_name_list, tbs):
-        """执行签到操作"""
-        success_count, error_count, exist_count, shield_count = 0, 0, 0, 0
-        
-        def sign_one_bar(tb_name):
-            """签到单个贴吧"""
-            md5 = hashlib.md5(f"kw={tb_name}tbs={tbs}tiebaclient!!!".encode()).hexdigest()
-            data = {"kw": tb_name, "tbs": tbs, "sign": md5}
-            try:
-                response = session.post(
-                    url="https://c.tieba.baidu.com/c/c/forum/sign",
-                    data=data,
-                    verify=False,
-                ).json()
-                if response["error_code"] == "0":
-                    return {"tb_name": tb_name, "status": "签到成功"}
-                elif response["error_code"] == "160002":
-                    return {"tb_name": tb_name, "status": "已经签到"}
-                elif response["error_code"] == "340006":
-                    return {"tb_name": tb_name, "status": "被屏蔽"}
-                else:
-                    return {"tb_name": tb_name, "status": "签到失败"}
-            except Exception as e:
-                return {"tb_name": tb_name, "status": f"签到异常: {e}"}
-
-        # 使用线程池进行并发签到
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(sign_one_bar, tb_name) for tb_name in tb_name_list]
-            results = [future.result() for future in concurrent.futures.as_completed(futures)]
-
-        # 统计签到结果
-        for result in results:
-            if result["status"] == "签到成功":
-                success_count += 1
-            elif result["status"] == "已经签到":
-                exist_count += 1
-            elif result["status"] == "被屏蔽":
-                shield_count += 1
-            else:
-                error_count += 1
-
-        # 格式化签到结果
-        msg = [
-            {"name": "贴吧总数", "value": len(tb_name_list)},
-            {"name": "签到成功", "value": success_count},
-            {"name": "已经签到", "value": exist_count},
-            {"name": "被屏蔽的", "value": shield_count},
-            {"name": "签到失败", "value": error_count},
-        ]
-        return msg
-
-    def send_notification(self, result: str):
-        """发送签到结果通知"""
-        try:
-            notify.send(self.name, result)
-            print("通知已发送:", result)  # 打印通知内容
-        except Exception as e:
-            print(f"通知发送失败: {str(e)}")
-
-    def main(self):
-        """主执行逻辑"""
-        tieba_cookie = {
-            item.split("=")[0]: item.split("=")[1]
-            for item in self.tieba_cookie.split("; ")
+    while True:
+        data = {
+            "TIEBA_COOKIE": tieba_cookie,
+            "_client_type": "2",
+            "_client_id": "wappc_1534235498291_488",
+            "_client_version": "9.7.8.0",
+            "_phone_imei": "000000000000000",
+            "from": "1008621y",
+            "page_no": str(page),
+            "page_size": "200",
+            "model": "MI+5",
+            "net_type": "1",
+            "timestamp": str(int(time.time())),
+            "vcode_tag": "11",
         }
-        session = requests.session()
-        requests.utils.add_dict_to_cookiejar(session.cookies, tieba_cookie)
-        session.headers.update({"Referer": "https://www.baidu.com/"})
 
-        # 验证登录状态
-        tbs, user_name = self.valid(session=session)
-        if tbs:
-            # 获取贴吧列表并执行签到
-            tb_name_list = self.get_tieba_list(session=session)
-            msg = self.sign(session=session, tb_name_list=tb_name_list, tbs=tbs)
-            msg = [{"name": "帐号信息", "value": user_name}] + msg
-            self.send_notification(f"✅【签到成功】\n{user_name} 贴吧签到完成")
+        try:
+            res = s.post(
+                url=Config.API_URLS["LIKE_URL"],
+                data=encodeData(data),
+                timeout=Config.HTTP_SETTINGS["TIMEOUT"],
+            ).json()
+
+            if not res.get("forum_list"):
+                break
+
+            for forum_type in ["non-gconforum", "gconforum"]:
+                if forum_type in res["forum_list"]:
+                    items = res["forum_list"][forum_type]
+                    if isinstance(items, list):
+                        all_bars.extend(items)
+                    else:
+                        all_bars.append(items)
+
+            if res.get("has_more") != "1":
+                break
+
+            page += 1
+
+        except Exception as e:
+            logger.error(f"获取第{page}页贴吧列表失败: {e}")
+            break
+
+    logger.info(f"共获取到{len(all_bars)}个贴吧")
+    return all_bars
+
+
+def encodeData(data):
+    s = ""
+    keys = data.keys()
+    for i in sorted(keys):
+        s += i + "=" + str(data[i])
+    sign = hashlib.md5((s + "tiebaclient!!!").encode("utf-8")).hexdigest().upper()
+    data.update({"sign": str(sign)})
+    return data
+
+
+def client_sign(tieba_cookie, tbs, fid, kw):
+    logger.info("开始签到贴吧：" + kw)
+    data = copy.copy(Config.SIGN_DATA)
+    data.update(
+        {
+            "TIEBA_COOKIE": tieba_cookie,
+            "fid": fid,
+            "kw": kw,
+            "tbs": tbs,
+            "timestamp": str(int(time.time())),
+        }
+    )
+    data = encodeData(data)
+    res = s.post(
+        url=Config.API_URLS["SIGN_URL"],
+        data=data,
+        timeout=Config.HTTP_SETTINGS["TIMEOUT"],
+    ).json()
+    return res
+
+
+def sign_one_bar(args):
+    tieba_cookie, tbs, bar = args
+    try:
+        time.sleep(
+            random.randint(
+                Config.THREAD_SETTINGS["MIN_DELAY"], Config.THREAD_SETTINGS["MAX_DELAY"]
+            )
+        )
+        res = client_sign(tieba_cookie, tbs, bar["id"], bar["name"])
+
+        error_code = res.get("error_code", "unknown")
+        status = Config.ERROR_CODES.get(str(error_code), f"未知错误: {error_code}")
+
+        if error_code in Config.SUCCESS_CODES:
+            logger.info(f'贴吧：{bar["name"]} 签到状态：{status}')
+        elif error_code in Config.CRITICAL_ERRORS:
+            logger.warning(f'贴吧：{bar["name"]} 签到状态：{status}')
         else:
-            msg = [
-                {"name": "帐号信息", "value": user_name},
-                {"name": "签到信息", "value": "Cookie 可能过期"},
+            logger.error(f'贴吧：{bar["name"]} 签到状态：{status}')
+
+        return {
+            "name": bar["name"],
+            "bar": bar,
+            "status": status,
+            "error_code": error_code,
+            "is_success": error_code in Config.SUCCESS_CODES,
+        }
+    except Exception as e:
+        logger.error(f'贴吧：{bar["name"]} 签到异常：{str(e)}')
+        return {
+            "name": bar["name"],
+            "bar": bar,
+            "status": "签到异常",
+            "error": str(e),
+            "is_success": False,
+        }
+
+
+def main():
+    if "TIEBA_COOKIE" not in ENV:
+        logger.error("未配置TIEBA_COOKIE")
+        return
+
+    tieba_cookie = ENV["TIEBA_COOKIE"].split("#")
+    max_workers = min(Config.THREAD_SETTINGS["MAX_WORKERS"], os.cpu_count() * 5)
+
+    for n, cookie in enumerate(tieba_cookie):
+        logger.info(f"开始签到第{n+1}个用户")
+        try:
+            tbs = get_tbs(cookie)
+            favorites = get_favorite(cookie)
+        except Exception as e:
+            logger.error(f"用户签到失败: {e}")
+            continue
+
+        rounds = 0
+        to_sign = favorites[:]
+        all_results = []
+
+        while rounds < 5 and to_sign:  # 当 to_sign 为空时，循环会结束
+            rounds += 1
+            logger.info(f"开始第 {rounds} 轮签到，待签到贴吧数：{len(to_sign)}")
+            results = []
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_bar = {
+                    executor.submit(sign_one_bar, (cookie, tbs, bar)): bar
+                    for bar in to_sign
+                }
+                # 并发执行签到
+                for future in concurrent.futures.as_completed(future_to_bar):
+                    result = future.result()
+                    if result:
+                        results.append(result)
+                        if result.get("error_code") in Config.CRITICAL_ERRORS:
+                            logger.warning(
+                                f"检测到严重问题：{result['status']}，停止当前用户的签到"
+                            )
+                            executor._threads.clear()
+                            break
+
+            all_results.extend(results)
+
+            # 过滤出未签到成功的贴吧
+            to_sign = [
+                result["bar"] for result in results if not result.get("is_success")
             ]
-            self.send_notification(f"❌【签到失败】\n{user_name} 登录失败，请检查Cookie。")
-        
-        # 格式化并返回消息
-        msg_str = "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg])
-        return msg_str
+
+            if to_sign:
+                logger.info(f"本轮签到完成，等待1分钟后进行下一轮签到")
+                time.sleep(60)
+            else:
+                logger.info("所有贴吧签到成功，结束签到")
+                break
 
 
 if __name__ == "__main__":
-    try:
-        # 启动签到任务
-        tieba = Tieba()
-        result = tieba.main()
-        print(result)
-    except Exception as e:
-        print(f"运行失败: {str(e)}")
+    main()
