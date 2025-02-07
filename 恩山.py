@@ -22,12 +22,14 @@ class EnShan:
             "User-Agent": "Mozilla/5.0 (Windows NT 6.3; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.5359.125 Safari/537.36",
             "Cookie": cookie,
         }
-        response = requests.get(
-            url="https://www.right.com.cn/FORUM/home.php?mod=spacecp&ac=credit&showcredit=1",
-            headers=headers,
-            verify=False,
-        )
         try:
+            response = requests.get(
+                url="https://www.right.com.cn/FORUM/home.php?mod=spacecp&ac=credit&showcredit=1",
+                headers=headers,
+                verify=False,
+            )
+            response.raise_for_status()  # 检查请求是否成功
+
             # 使用正则表达式提取“恩山币”和“积分”
             coin = re.findall("恩山币: </em>(.*?)&nbsp;", response.text)
             point = re.findall("<em>积分: </em>(.*?)<span", response.text)
@@ -37,16 +39,26 @@ class EnShan:
                     {"name": "恩山币", "value": coin[0]},
                     {"name": "积分", "value": point[0]},
                 ]
-                # 发送通知
-                notification_msg = f"✅【签到成功】\n恩山币: {coin[0]}\n积分: {point[0]}"
+                # 构造通知消息
+                notification_msg = f"✅【签到成功】\n积分变更: 恩山币 +1\n恩山币: {coin[0]}\n积分: {point[0]}"
                 EnShan.send_notification(notification_msg)
+                
+                # 输出详细日志
+                print(f"签到成功！恩山币: {coin[0]}, 积分: {point[0]}")
             else:
                 raise ValueError("无法提取到恩山币或积分，可能页面结构已变更。")
+        except requests.exceptions.RequestException as e:
+            # 请求失败时处理
+            msg = [{"name": "签到失败", "value": f"请求错误: {str(e)}"}]
+            notification_msg = f"❌【签到失败】\n请求错误: {str(e)}"
+            EnShan.send_notification(notification_msg)
+            print(f"请求失败: {str(e)}")
         except Exception as e:
+            # 其他异常处理
             msg = [{"name": "签到失败", "value": f"错误: {str(e)}"}]
-            # 发送签到失败的通知
             notification_msg = f"❌【签到失败】\n错误: {str(e)}"
             EnShan.send_notification(notification_msg)
+            print(f"签到失败: {str(e)}")
 
         return msg
 
