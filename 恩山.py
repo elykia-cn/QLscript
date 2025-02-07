@@ -1,7 +1,7 @@
 import os
-import re
 import logging
 import requests
+from lxml import etree
 import notify  # 引入青龙面板的通知模块
 
 # 配置日志记录
@@ -30,23 +30,26 @@ class EnShan:
         """执行签到操作"""
         try:
             logging.info("开始进行签到请求...")
-            response = requests.get(self.CREDIT_URL, headers=self._build_headers(), timeout=10)
-            response.raise_for_status()
+            with requests.Session() as s:
+                s.headers.update(self._build_headers())
+                response = s.get(self.CREDIT_URL, timeout=10)
+                response.raise_for_status()
 
-            # 判断签到是否成功
-            if '每天登录' in response.text:
-                # 使用正则表达式提取最后签到时间
-                match = re.search(r'<td class="num">([^<]+)</td>', response.text)
-                if match:
-                    last_sign_time = match.group(1)
-                    msg = f"✅【签到成功】\n今日已成功签到！\n最后签到时间：{last_sign_time}"
-                    self.send_notification(msg)
+                # 判断签到是否成功
+                if '每天登录' in response.text:
+                    # 使用XPath提取最后签到时间
+                    h = etree.HTML(response.text)
+                    last_sign_time = h.xpath('//td[@class="num"]/text()')[0] if h.xpath('//td[@class="num"]/text()') else None
+                    
+                    if last_sign_time:
+                        msg = f"✅【签到成功】\n今日已成功签到！\n最后签到时间：{last_sign_time}"
+                        self.send_notification(msg)
+                    else:
+                        msg = "❌【签到失败】\n未能提取签到时间，可能页面结构已变更。"
+                        self.send_notification(msg)
                 else:
-                    msg = "❌【签到失败】\n未能提取签到时间，可能页面结构已变更。"
+                    msg = '❌【签到失败】\n签到失败，可能是cookie失效或签到状态异常！'
                     self.send_notification(msg)
-            else:
-                msg = '❌【签到失败】\n签到失败，可能是cookie失效或签到状态异常！'
-                self.send_notification(msg)
 
         except requests.exceptions.RequestException as e:
             logging.error(f"请求失败: {str(e)}")
