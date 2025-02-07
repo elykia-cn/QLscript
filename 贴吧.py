@@ -1,9 +1,12 @@
-import hashlib
-import json
 import os
-import re
 import requests
-import notify  # 引入青龙面板的通知模块
+import hashlib
+import re
+import time
+import random
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
+import notify  # 青龙面板的通知模块
 
 class Tieba:
     """百度贴吧签到器"""
@@ -27,7 +30,7 @@ class Tieba:
         except Exception as e:
             return False, f"登录验证异常,错误信息: {e}"
 
-        data = json.loads(content.text)
+        data = content.json()
         if data["is_login"] == 0:
             return False, "登录失败,cookie 异常"
 
@@ -73,10 +76,10 @@ class Tieba:
     def sign(session, tb_name_list, tbs):
         """执行签到操作"""
         success_count, error_count, exist_count, shield_count = 0, 0, 0, 0
-        for tb_name in tb_name_list:
-            md5 = hashlib.md5(
-                f"kw={tb_name}tbs={tbs}tiebaclient!!!".encode()
-            ).hexdigest()
+        
+        def sign_one_bar(tb_name):
+            """签到单个贴吧"""
+            md5 = hashlib.md5(f"kw={tb_name}tbs={tbs}tiebaclient!!!".encode()).hexdigest()
             data = {"kw": tb_name, "tbs": tbs, "sign": md5}
             try:
                 response = session.post(
@@ -85,16 +88,32 @@ class Tieba:
                     verify=False,
                 ).json()
                 if response["error_code"] == "0":
-                    success_count += 1
+                    return {"tb_name": tb_name, "status": "签到成功"}
                 elif response["error_code"] == "160002":
-                    exist_count += 1
+                    return {"tb_name": tb_name, "status": "已经签到"}
                 elif response["error_code"] == "340006":
-                    shield_count += 1
+                    return {"tb_name": tb_name, "status": "被屏蔽"}
                 else:
-                    error_count += 1
+                    return {"tb_name": tb_name, "status": "签到失败"}
             except Exception as e:
-                print(f"贴吧 {tb_name} 签到异常,原因{str(e)}")
-        
+                return {"tb_name": tb_name, "status": f"签到异常: {e}"}
+
+        # 使用线程池进行并发签到
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(sign_one_bar, tb_name) for tb_name in tb_name_list]
+            results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+        # 统计签到结果
+        for result in results:
+            if result["status"] == "签到成功":
+                success_count += 1
+            elif result["status"] == "已经签到":
+                exist_count += 1
+            elif result["status"] == "被屏蔽":
+                shield_count += 1
+            else:
+                error_count += 1
+
         # 格式化签到结果
         msg = [
             {"name": "贴吧总数", "value": len(tb_name_list)},
