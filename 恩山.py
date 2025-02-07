@@ -5,7 +5,6 @@ import requests
 import urllib3
 import notify  # 引入青龙面板的通知模块
 
-from dailycheckin import CheckIn
 
 urllib3.disable_warnings()
 
@@ -17,7 +16,12 @@ class EnShan(CheckIn):
         self.check_item = check_item
 
     @staticmethod
-    def sign(cookie):
+    def sign():
+        # 从环境变量获取 ENSHAN_COOKIE
+        cookie = os.getenv("ENSHAN_COOKIE")
+        if not cookie:
+            raise ValueError("请设置 ENSHAN_COOKIE 环境变量")
+
         msg = []
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 6.3; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.5359.125 Safari/537.36",
@@ -62,17 +66,13 @@ class EnShan(CheckIn):
             print(f"通知发送失败: {str(e)}")
 
     def main(self):
-        cookie = self.check_item.get("cookie")
-        msg = self.sign(cookie=cookie)
+        msg = self.sign()
         msg = "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg])
         return msg
 
 
 if __name__ == "__main__":
-    with open(
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json"),
-        encoding="utf-8",
-    ) as f:
-        datas = json.loads(f.read())
-    _check_item = datas.get("ENSHAN", [])[0]
-    print(EnShan(check_item=_check_item).main())
+    try:
+        print(EnShan(check_item={}).main())
+    except ValueError as e:
+        print(str(e))
