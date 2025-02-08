@@ -1,38 +1,50 @@
-/*
-cron: 59 15 8 * * *
-王者营地每日签到
-自己抓包找到如下参数并设置到变量WZYD_TOKEN和WZYY_BODY里,多个账号用分号隔开
-{"appid": "","openid": "","msdkEncodeParam": "","sig": "","userId": "","source": "","encode": 2,"timestamp": "","algorithm": "v2","version": "3.1.96i"};{"appid": "","openid": "","msdkEncodeParam": "","sig": "","userId": "","source": "","encode": 2,"timestamp": "","algorithm": "v2","version": "3.1.96i"}
-{"cSystem":"ios","h5Get":1,"roleId":"1685189495"};{"cSystem":"ios","h5Get":1,"roleId":"520128481"}
-*/
-const axios = require('axios')
-const notify = require('./sendNotify')
-function version(){
-	return new Promise(function(resolve,reject){
-	resolve(axios.get("https://gitee.com/naro_li/statement/raw/main/naro-scripts"))})
+const axios = require('axios');
+const notify = require('./sendNotify');
+
+async function main() {
+  try {
+    // 从环境变量中获取Token和Body
+    const tokenEnv = process.env.WZYD_TOKEN;
+    const bodyEnv = process.env.WZYD_BODY;
+
+    if (!tokenEnv || !bodyEnv) {
+      console.error("环境变量 WZYD_TOKEN 或 WZYD_BODY 未设置");
+      return;
+    }
+
+    const tokens = tokenEnv.split(';');
+    const bodies = bodyEnv.split(';');
+
+    if (tokens.length !== bodies.length) {
+      console.error("WZYD_TOKEN 和 WZYD_BODY 数量不匹配");
+      return;
+    }
+
+    const promises = tokens.map(async (token, index) => {
+      try {
+        const headers = JSON.parse(token);
+        const payload = JSON.parse(bodies[index]);
+
+        const response = await axios.post(
+          'https://kohcamp.qq.com/operation/action/signin',
+          payload,
+          { headers }
+        );
+
+        console.log(`${payload.roleId} 的王者营地签到结果:`, response.data);
+        await notify.sendNotify(
+          `${payload.roleId} 的王者营地签到结果`,
+          JSON.stringify(response.data)
+        );
+      } catch (error) {
+        console.error(`账号 ${index + 1} 签到失败:`, error.message);
+      }
+    });
+
+    await Promise.all(promises);
+  } catch (error) {
+    console.error("脚本运行出错:", error.message);
+  }
 }
 
-async function main(){
-    	await version().then(data=>{console.log(data.data)})
-		// 从环境变量中获取Cookie
-		const cookieHeaderValue = process.env.WZYD_TOKEN;
-        const bodyValue = process.env.WZYD_BODY;
-		// 将Cookie值拆分为单独的Cookie
-		const cookies = cookieHeaderValue.split(';');
-        const body = bodyValue.split(';');
-        let count = 0 
-		for (cookie of cookies){
-			const header = JSON.parse(cookie)
-            const payload = JSON.parse(body[count])
-            axios.post('https://kohcamp.qq.com/operation/action/signin',payload,{headers:header} )
-            .then((res) => {
-                console.log(payload.roleId+'的王者营地签到结果'+JSON.stringify(res.data))
-                notify.sendNotify(payload.roleId+'的王者营地签到结果',JSON.stringify(res.data))
-            }).catch((error) => {
-                console.error(error)
-            })
-                count = count +1
-            }
-			
-}
-main()
+main();
